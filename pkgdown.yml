@@ -1,0 +1,10 @@
+pandoc: 3.8.3
+pkgdown: 2.2.1
+pkgdown_sha: ~
+articles:
+  BiSCaL: BiSCaL.html
+  simulation: simulation.html
+last_built: 2026-10-09T21:18Z
+urls:
+  reference: https://pingbohu43.github.io/BiSCaL/reference
+  article: https://pingbohu43.github.io/BiSCaL/articles
