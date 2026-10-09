@@ -1,0 +1,176 @@
+---
+title: "Simulation studies of the paper"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Simulation studies of the paper}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+This vignette reproduces the simulation studies of Section 5.2 of Hu and Yi
+(2026) with `BiSCaL`. It describes the designs, computes the true values of
+the effects, analyzes one simulated data set, and summarizes a full run of the
+studies (100 replicates of each design).
+
+```{r}
+library(BiSCaL)
+```
+
+## Designs
+
+Each simulated data set has $n = 5000$ subjects followed at a baseline visit
+and $K = 20$ follow-up visits. There is one standard normal covariate $X$, and
+a treatment assigned with probability 0.5. The binary responses follow models
+(12)–(14) of the paper. All coefficients equal 0.5 except the treatment
+coefficients $(\beta_{1,3,1}, \beta_{2,3,1})$:
+
+* case 1: $(5, 0.1)$, the treatment mainly affects the first response;
+* case 2: $(0, 0)$, no treatment effect;
+* case 3: $(0.1, 5)$, the treatment mainly affects the second response.
+
+```{r}
+biscal_coefs(case = 1)$beta1
+```
+
+`simulate_biscal()` generates complete data (Section 5.2.2), or data with
+censoring and intermittent missingness (`missing = TRUE`, Section 5.2.3). In
+the latter, subject $i$ is followed up to visit
+$C_i \sim \mathrm{Binomial}(20, \sigma(1.5 + x_i))$. At each follow-up visit,
+the two responses are missing with probabilities $\sigma(x_i)$ and
+$\sigma(x_i - 0.5)$.
+
+```{r}
+d <- simulate_biscal(n = 5000, K = 20, case = 3, missing = TRUE, seed = 1)
+head(d)
+mean(attr(d, "censoring"))                     # mean censoring time
+fu <- d[d$visit > 0, ]
+c(mean(tapply(is.na(fu$y1), fu$id, mean)),     # mean missingness rates
+  mean(tapply(is.na(fu$y2), fu$id, mean)))
+```
+
+## True values
+
+The target is $DEASTE_K = E|STE_{1,K}(X)| - E|STE_{2,K}(X)|$ at $K = 20$, the
+expectation being over $X \sim N(0, 1)$. `biscal_truth()` computes it by
+numerical integration:
+
+```{r}
+truth <- t(sapply(1:3, function(case) biscal_truth(K = 20, case = case)))
+rownames(truth) <- paste("case", 1:3)
+signif(truth, 4)
+```
+
+These are the values $T$ in Tables 5 and 7 of the paper. Case 1 gives
+$6.515 \times 10^{-3}$, against $6.535 \times 10^{-3}$ in the paper, whose
+value was computed by Monte Carlo integration.
+
+## One replicate
+
+Each replicate fits the models, then estimates $DEASTE_{20}$ as an average
+over 10,000 draws from the covariate distribution. It tests
+$H_0: DEASTE_{20} \ge 0$ against $H_1: DEASTE_{20} < 0$:
+
+```{r}
+fit <- biscal(cbind(y1, y2) ~ x, data = d, id = "id", time = "visit", treatment = "trt")
+set.seed(2)
+draws <- data.frame(x = rnorm(10000))
+res <- easte(fit, newdata = draws, K = 20)
+res$test
+```
+
+The estimate from a single data set carries sampling error. The repeated
+replicates below show the behavior of the estimator.
+
+The full study repeats this 100 times for each design. The code is in
+`data-raw/simulation-study.R` in the package sources. It uses
+`parallel::mclapply()` and takes about 2 seconds per replicate and core.
+
+```{r, eval = FALSE}
+one_rep <- function(i, case, missing) {
+  seed <- 100000 * missing + 1000 * case + i
+  d <- simulate_biscal(n = 5000, K = 20, case = case, missing = missing, seed = seed)
+  fit <- biscal(cbind(y1, y2) ~ x, data = d, id = "id", time = "visit",
+                treatment = "trt")
+  set.seed(seed + 500000)
+  e <- easte(fit, newdata = data.frame(x = rnorm(10000)), K = 20)
+  list(coef = coef(fit), se = sqrt(diag(vcov(fit))), deaste = e$test$estimate,
+       se_deaste = e$test$std.error, p = e$test$p.value)
+}
+reps <- parallel::mclapply(1:100, one_rep, case = 1, missing = FALSE, mc.cores = 4)
+```
+
+## Results of the full study
+
+The results of the full run are stored in the package:
+
+```{r}
+sim <- readRDS(system.file("extdata", "simulation-study.rds", package = "BiSCaL"))
+sim$settings
+```
+
+### Separable effects (Tables 5 and 7)
+
+For each design, the table gives the true value (T) and the average estimate
+(AE). It also gives the average standard error (ASE), the average p-value of
+the test (AP) and the coverage (CP, %) of the 95% confidence interval:
+
+```{r}
+summ_deaste <- function(r) {
+  covered <- abs(r$deaste - r$true_deaste) <= qnorm(0.975) * r$se_deaste
+  c(T = r$true_deaste, AE = mean(r$deaste), ASE = mean(r$se_deaste),
+    AP = mean(r$p), CP = 100 * mean(covered))
+}
+tab <- t(sapply(sim$results, summ_deaste))
+rownames(tab) <- sprintf("case %d, %s", sapply(sim$results, `[[`, "case"),
+                         ifelse(sapply(sim$results, `[[`, "missing"),
+                                "missingness and censoring", "complete data"))
+signif(tab, 3)
+```
+
+As in the paper, the sign of the estimated $DEASTE_{20}$ matches the design:
+
+* case 1: positive, and the test does not reject $H_0$;
+* case 2: close to zero;
+* case 3: negative, and $H_0$ is rejected.
+
+The coverage of the confidence intervals is close to the nominal 95%.
+
+### Model parameters (Tables 4 and 6)
+
+The same summaries for the coefficients of the regression models; the labels
+follow the notation of the paper:
+
+```{r}
+labels <- c("beta[1,0,1]", "beta[1,1,1]", "beta[1,2,1]", "beta[1,3,1]", "beta[1,4,1]",
+            "beta[2,0,1]", "beta[2,1,1]", "beta[2,2,1]", "beta[2,3,1]", "beta[2,4,1]",
+            "gamma[1,0,1]", "gamma[1,2,1]", "gamma[2,0,1]", "gamma[2,1,1]", "gamma[2,2,1]")
+summ_coef <- function(r) {
+  covered <- abs(sweep(r$coef, 2, r$true_coef)) <= qnorm(0.975) * r$se
+  data.frame(T = r$true_coef, AE = colMeans(r$coef), ASE = colMeans(r$se),
+             CP = 100 * colMeans(covered), row.names = labels)
+}
+for (r in sim$results) {
+  cat(sprintf("\nCase %d, %s\n", r$case,
+              if (r$missing) "missingness and censoring" else "complete data"))
+  print(signif(summ_coef(r), 3))
+}
+```
+
+The estimates are close to the true values and the coverage is close to 95%.
+This reproduces the conclusions of Tables 4 and 6.
+
+The numbers differ from the published tables because the replicates use
+different random numbers. For the design with missingness and censoring, the
+data generation is also implemented differently: here, no visit after the
+censoring time $C_i$ is recorded. With 100 replicates, the Monte Carlo standard
+error of a coverage near 95% is about 2.2 percentage points.
+
+## Reference
+
+Hu, P. and Yi, G. Y. (2026). Inference about separable causal effects with
+longitudinal bivariate ordinal responses with missingness and censoring.
+*Statistics in Medicine*, 45, e70320. <https://doi.org/10.1002/sim.70320>

@@ -1,0 +1,339 @@
+---
+title: "Getting started with BiSCaL"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting started with BiSCaL}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 7, fig.height = 3.6,
+                      dpi = 96)
+```
+
+`BiSCaL` estimates and tests **separable causal treatment effects** on two
+ordinal (including binary) responses that are measured repeatedly in a
+longitudinal study, following Hu and Yi (2026). This vignette introduces the
+framework and walks through an analysis of the simulated trial `simtrial` that
+ships with the package.
+
+```{r}
+library(BiSCaL)
+```
+
+## The framework in brief
+
+Subjects are randomized to a treatment $A \in \{0, 1\}$ and followed at visits
+$k = 0, 1, \dots, K$, where two responses $Y_{1,k}$ and $Y_{2,k}$ are recorded,
+$Y_{1,k}$ before $Y_{2,k}$. In the motivating Lipid Research Clinics Coronary
+Primary Prevention Trial, $Y_{1,k}$ indicates high HDL cholesterol and
+$Y_{2,k}$ low LDL cholesterol. The two responses influence each other over time
+and depend on baseline covariates $X$.
+
+The treatment is conceptualized as having two components: $A_1$, which acts on
+the first response, and $A_2$, which acts on the second ($A = a$ corresponds to
+$A_1 = A_2 = a$). The effects are defined at the end time point $K$ through the
+**generalized odds ratio** of the two responses under $(A_1, A_2) = (a_1, a_2)$,
+given $X = x$:
+
+$$GOR_K(a_1, a_2) = \frac{P(Y_1 \le y_1, Y_2 \le y_2)\, P(Y_1 > y_1, Y_2 > y_2)}
+{P(Y_1 \le y_1, Y_2 > y_2)\, P(Y_1 > y_1, Y_2 \le y_2)},$$
+
+where $Y_j = Y_{j,K}(a_1, a_2)$ are counterfactual responses and $y_1, y_2$ are
+thresholds (for binary responses, $y_1 = y_2 = 0$). A positive $\log GOR$ means
+that the two responses tend to fall on the same side of their thresholds. Then
+
+* the **total treatment effect** is
+  $TTE_K = \log\{GOR_K(1,1) / GOR_K(0,0)\}$;
+* the **separable treatment effect** on response 1 changes only the component
+  acting on it:
+  $STE_{1,K} = \log\{GOR_K(1,1)/GOR_K(0,1)\} + \log\{GOR_K(1,0)/GOR_K(0,0)\}$,
+  and $STE_{2,K}$ is defined symmetrically;
+* by Theorem 1 of the paper, $STE_{1,K} + STE_{2,K} = 2\,TTE_K$.
+
+The arms $(1, 0)$ and $(0, 1)$ are never observed. They are identified under
+conditional exchangeability, consistency, positivity and a condition on the
+treatment components (Conditions 1–4 of the paper). The identification is a
+recursive formula in the transition probabilities of the responses. `BiSCaL`
+models these probabilities with baseline-category logistic regressions,
+estimates them by maximum likelihood (allowing for intermittent missingness and
+censoring), and propagates them through the recursion.
+
+The quantity used to compare the two responses is the difference of the
+**absolute separable treatment effects**,
+$DASTE_K = |STE_{1,K}| - |STE_{2,K}|$. A negative value means that the
+treatment affects the second response more than the first.
+
+## The data
+
+`simtrial` is a simulated trial with 1000 subjects, a baseline visit and ten
+follow-up visits. It has two binary responses, a continuous covariate `x1` and
+a binary covariate `x2`. The data are in long format, one row per subject and
+recorded visit:
+
+```{r}
+head(simtrial, 12)
+```
+
+Missing responses are coded `NA` (intermittent missingness). Subjects are
+followed until a censoring visit, after which they have no rows:
+
+```{r}
+table(simtrial$visit)
+```
+
+The visit index must be `0` at baseline and `1, 2, ...` at the scheduled
+follow-up visits. The treatment and covariates must be constant within subjects.
+
+## Fitting the models
+
+`biscal()` fits four regression models by maximum likelihood:
+
+* a transition model for each response, models (12) of the paper;
+* a baseline model for each response, models (13) and (14).
+
+The left-hand side of the formula lists the two responses, the one measured
+first at each visit first. The right-hand side lists the baseline covariates.
+
+```{r}
+fit <- biscal(cbind(y1, y2) ~ x1 + x2, data = simtrial, id = "id",
+              time = "visit", treatment = "trt")
+fit
+```
+
+A transition of the first response at visit $k$ enters the likelihood when
+$Y_{1,k}$, $Y_{1,k-1}$ and $Y_{2,k-1}$ are all observed. A transition of the
+second response enters when $Y_{2,k}$, $Y_{2,k-1}$ and $Y_{1,k}$ are observed
+(Section 4.2 of the paper). `summary()` gives the coefficient tables, in the
+format of Table 1 of the paper:
+
+```{r}
+summary(fit)
+```
+
+The treatment raises the chance of a high value of the first response
+considerably (coefficient `r round(coef(fit)[["beta1:trt"]], 2)`), and of the
+second only slightly (`r round(coef(fit)[["beta2:trt"]], 2)`). Each response
+also depends strongly on its own previous value and on the other response.
+
+## Effects for given covariate values
+
+`aste()` estimates the effects for covariate profiles supplied in `newdata`.
+It computes delta-method standard errors and tests
+$H_0: DASTE_K \ge 0$ against $H_1: DASTE_K < 0$ (Section 3.2.1 of the paper).
+As in Table 2 of the paper, we take the smallest and the largest value of each
+covariate:
+
+```{r}
+profiles <- data.frame(x1 = range(simtrial$x1), x2 = c(0, 1))
+ind <- aste(fit, newdata = profiles)
+ind
+```
+
+```{r, include = FALSE}
+est <- function(res, pr, eff) {
+  e <- res$effects
+  signif(e$estimate[e$profile == pr & e$effect == eff], 2)
+}
+pv <- function(res, pr) signif(res$test$p.value[res$test$profile == pr], 2)
+```
+
+A negative separable effect means that the corresponding treatment component
+lowers the log generalized odds ratio. All estimated generalized odds ratios
+here exceed one (see below), so a negative effect weakens the positive
+association of the two responses at the last visit.
+
+* For the smallest covariate values, $STE_1$ is estimated at
+  `r est(ind, 1, "STE1")`, but its confidence interval includes zero.
+* For the largest values, $STE_1$ (`r est(ind, 2, "STE1")`) and $STE_2$
+  (`r est(ind, 2, "STE2")`) are both negative and of similar size.
+
+The test of the paper, whose alternative is that the treatment affects the
+second response more, is far from significant for both profiles
+(p = `r pv(ind, 1)` and `r pv(ind, 2)`). The opposite direction can be tested
+with `alternative = "greater"`:
+
+```{r}
+aste(fit, newdata = profiles, alternative = "greater")$test
+```
+
+The results are also available as data frames, together with the underlying
+generalized odds ratios:
+
+```{r}
+head(as.data.frame(ind))
+as.data.frame(ind, what = "gor")[1:4, ]
+```
+
+## Effects over follow-up
+
+A vector `K` gives the effects at several end time points. Their curves show
+how the effects build up over the visits:
+
+```{r, fig.height = 3.8}
+path <- aste(fit, newdata = data.frame(x1 = 0, x2 = 1), K = 1:10)
+op <- par(mfrow = c(1, 2), mar = c(4, 4, 2, 1))
+plot(path)
+plot(path, effects = "DASTE")
+par(op)
+```
+
+The effects change over the first few visits and then stabilize, as the
+transitions settle into their long-run behavior.
+
+## Population-level effects
+
+`easte()` averages the effects over a distribution of the covariates. It
+estimates the expected absolute separable treatment effects
+$EASTE_{j,K} = E|STE_{j,K}(X)|$ and their difference $DEASTE_K$, with a Wald
+test (Section 3.2.2 of the paper). By default, the average is over the
+covariates of the subjects in the data. The standard errors then include the
+sampling variability of the covariates.
+
+```{r}
+pop <- easte(fit)
+pop
+```
+
+Averaged over the participants, both separable effects are negative: the
+treatment weakens the (positive) association of the two responses through
+both of its components. The weakening is stronger through the component acting on the
+first response ($EASTE_1$ = `r signif(pop$effects$estimate[pop$effects$effect == "EASTE1"], 2)`
+against $EASTE_2$ = `r signif(pop$effects$estimate[pop$effects$effect == "EASTE2"], 2)`).
+The difference is not statistically significant (two-sided p-value
+`r signif(easte(fit, alternative = "two.sided")$test$p.value, 2)`).
+
+The paper instead averages over a large number of draws from a model for the
+covariate distribution: a Gaussian mixture for the continuous covariates within
+groups defined by the discrete ones. Any such model can be used by passing the
+draws as `newdata`. Here is a simple version, with `x2` drawn from its observed
+frequency and `x1` from a normal distribution within each level of `x2`:
+
+```{r}
+base <- unique(simtrial[, c("id", "x1", "x2")])
+set.seed(1)
+M <- 5000
+x2 <- rbinom(M, 1, mean(base$x2))
+mu <- tapply(base$x1, base$x2, mean)
+sdev <- tapply(base$x1, base$x2, sd)
+draws <- data.frame(x1 = rnorm(M, mu[x2 + 1], sdev[x2 + 1]), x2 = x2)
+easte(fit, newdata = draws)$effects
+```
+
+With supplied draws, the standard errors treat the covariate distribution as
+known, as in the authors' implementation. The variance formula of the paper
+also includes the uncertainty of the estimated covariate model, which is
+therefore not reflected here. The column `mc_se` gives the Monte Carlo error
+of the average.
+
+## Counterfactual distributions
+
+`cf_prob()` returns the joint distribution of the two responses under any
+combination of the treatment components, and `gor()` the generalized odds
+ratios:
+
+```{r}
+pr <- cf_prob(fit, newdata = data.frame(x1 = 0, x2 = 1), a1 = 1, a2 = 0)
+round(pr[1, , , 1], 3)
+gor(fit, newdata = data.frame(x1 = 0, x2 = 1), a1 = c(1, 1, 0, 0), a2 = c(1, 0, 1, 0))
+```
+
+## Ordinal responses
+
+Responses with more than two ordered categories are handled in the same way:
+models (12)–(14) become baseline-category logistic regressions, with dummy
+codes of the previous responses. The thresholds `y1` and `y2` choose where the
+responses are dichotomized in the generalized odds ratio. To illustrate, we
+simulate three-category responses from coefficient matrices with one column per
+non-reference category:
+
+```{r}
+mk <- function(v, terms) matrix(v, ncol = 2, dimnames = list(terms, c("1", "2")))
+co <- list(
+  beta1 = mk(c(-0.5, 1.2, 2.0, 0.3, 0.5, 0.8, 0.4, -1.0, 0.8, 2.5, 0.2, 0.9, 0.2, 0.3),
+             c("(Intercept)", "y1[k-1]=1", "y1[k-1]=2", "y2[k-1]=1", "y2[k-1]=2", "trt", "x")),
+  beta2 = mk(c(-0.3, 0.5, 0.9, 1.5, 2.2, -0.4, 0.2, -0.8, 0.7, 1.4, 1.0, 2.8, 0.6, -0.2),
+             c("(Intercept)", "y1[k]=1", "y1[k]=2", "y2[k-1]=1", "y2[k-1]=2", "trt", "x")),
+  gamma1 = mk(c(0.2, 0.5, -0.3, 0.4), c("(Intercept)", "x")),
+  gamma2 = mk(c(0.1, 0.8, 1.2, 0.3, -0.5, 0.4, 1.5, -0.2),
+              c("(Intercept)", "y1[0]=1", "y1[0]=2", "x")))
+d3 <- simulate_biscal(n = 2000, K = 5, coefs = co, missing = TRUE, seed = 1)
+fit3 <- biscal(cbind(y1, y2) ~ x, data = d3, id = "id", time = "visit",
+               treatment = "trt")
+aste(fit3, newdata = data.frame(x = 0), y1 = 1, y2 = 0)
+```
+
+In this design, the two treatment components act in opposite directions:
+$STE_1$ is negative and $STE_2$ positive, so the total effect is small.
+
+## The LRC-CPPT analysis of the paper
+
+The data of the Lipid Research Clinics Coronary Primary Prevention Trial are
+available from BioLINCC (<https://biolincc.nhlbi.nih.gov/studies/lrccppt/>)
+on request. They cannot be distributed with the package, so the code below is
+not run here. Suppose `cppt` holds the data in long format, prepared as
+described in Section 5.1 of the paper. It has one row per subject and visit,
+with `visit = 0` at the visit when the medication was dispensed, the binary
+responses `hdl_high` (HDL at least 60 mg/dL) and `ldl_low` (LDL below
+130 mg/dL), the treatment `trt` and the eight baseline covariates. The
+analyses of Tables 1 to 3 are then:
+
+```{r, eval = FALSE}
+f <- cbind(hdl_high, ldl_low) ~ BMI + EDUC + EVDNK + EVSMK + PHYSA + PHYSB + RACE + V5AGE
+fit <- biscal(f, data = cppt, id = "ID", time = "visit", treatment = "trt")
+summary(fit)                                   # Table 1
+
+# Table 2: smallest and largest value of each covariate (Situations 1 and 2)
+covs <- fit$covariate_data
+situations <- as.data.frame(rbind(sapply(covs, min), sapply(covs, max)))
+aste(fit, newdata = situations)
+
+# Table 3: within a group defined by the discrete covariates, a Gaussian
+# mixture for (BMI, V5AGE), here with two components
+library(mixtools)
+grp <- with(covs, EDUC == 0 & EVDNK == 1 & EVSMK == 1 & PHYSA == 0 & PHYSB == 0 &
+                  RACE == 1)
+set.seed(1)
+gm <- mvnormalmixEM(as.matrix(covs[grp, c("BMI", "V5AGE")]), k = 2)
+rgmm <- function(M, gm) {     # draws from the fitted mixture
+  comp <- sample(length(gm$lambda), M, replace = TRUE, prob = gm$lambda)
+  out <- matrix(NA_real_, M, length(gm$mu[[1]]))
+  for (j in seq_along(gm$lambda)) {
+    idx <- which(comp == j)
+    z <- matrix(rnorm(length(idx) * ncol(out)), ncol = ncol(out))
+    out[idx, ] <- sweep(z %*% chol(gm$sigma[[j]]), 2, gm$mu[[j]], "+")
+  }
+  out
+}
+xy <- rgmm(100000, gm)
+draws <- data.frame(BMI = xy[, 1], EDUC = 0, EVDNK = 1, EVSMK = 1, PHYSA = 0,
+                    PHYSB = 0, RACE = 1, V5AGE = xy[, 2])
+easte(fit, newdata = draws)
+```
+
+## Practical notes
+
+* **Assumptions.** The causal interpretation rests on Conditions 1–4 of the
+  paper. Validity under missingness and censoring rests on Conditions AC1 and
+  AC2: given the treatment, the covariates and the previous responses,
+  censoring and missingness carry no further information about the current
+  response. Condition 4 concerns the treatment components and cannot be tested
+  when only the combined treatment is given.
+* **Time homogeneity.** The transition models are common to all visits, so
+  the visits should be equally spaced (or at least have comparable dynamics).
+* **Separation.** Binary or ordinal regressions can separate: a category may
+  be (almost) perfectly predicted, for example a baseline response that is
+  nearly constant because of inclusion criteria. `biscal()` then warns about
+  very large standard errors. The affected probabilities are estimated as
+  practically 0 or 1.
+* **Standard errors** use the delta method of the paper, with numerical
+  derivatives as in the authors' implementation. The absolute values in $ASTE$ are differentiated through the sign
+  of $STE$, so tests of $DASTE$ are unreliable when an $STE$ is close to zero
+  relative to its standard error.
+
+## Reference
+
+Hu, P. and Yi, G. Y. (2026). Inference about separable causal effects with
+longitudinal bivariate ordinal responses with missingness and censoring.
+*Statistics in Medicine*, 45, e70320. <https://doi.org/10.1002/sim.70320>

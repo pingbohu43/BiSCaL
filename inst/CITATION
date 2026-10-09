@@ -1,0 +1,29 @@
+bibentry(
+  bibtype = "Article",
+  header = "To cite the methodology implemented in BiSCaL, please use:",
+  title = "Inference About Separable Causal Effects With Longitudinal Bivariate Ordinal Responses With Missingness and Censoring",
+  author = c(person("Pingbo", "Hu"), person(c("Grace", "Y."), "Yi")),
+  journal = "Statistics in Medicine",
+  year = "2026",
+  volume = "45",
+  pages = "e70320",
+  doi = "10.1002/sim.70320",
+  textVersion = paste(
+    "Hu, P. and Yi, G. Y. (2026).",
+    "Inference about separable causal effects with longitudinal bivariate ordinal",
+    "responses with missingness and censoring.",
+    "Statistics in Medicine, 45, e70320. doi:10.1002/sim.70320")
+)
+
+bibentry(
+  bibtype = "Manual",
+  header = "To cite the software, please use:",
+  title = "{BiSCaL}: Bivariate Separable Causal Effects in Longitudinal Studies",
+  author = person("Pingbo", "Hu"),
+  year = "2026",
+  note = sprintf("R package version %s", meta$Version),
+  url = "https://github.com/pingbohu43/BiSCaL",
+  textVersion = paste0(
+    "Hu, P. (2026). BiSCaL: Bivariate Separable Causal Effects in Longitudinal Studies. ",
+    "R package version ", meta$Version, ". https://github.com/pingbohu43/BiSCaL")
+)

@@ -1,0 +1,118 @@
+---
+output: github_document
+---
+
+<!-- README.md is generated from README.Rmd. Please edit that file. -->
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.path = "man/figures/README-",
+                      dpi = 110)
+```
+
+# BiSCaL <img src="man/figures/logo.png" align="right" height="120" alt="" />
+
+<!-- badges: start -->
+[![R-CMD-check](https://github.com/pingbohu43/BiSCaL/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/pingbohu43/BiSCaL/actions/workflows/R-CMD-check.yaml)
+[![License: GPL (>= 3)](https://img.shields.io/badge/license-GPL%20(%3E%3D%203)-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+<!-- badges: end -->
+
+**BiSCaL** (Bivariate Separable Causal effects in Longitudinal studies)
+estimates and tests causal treatment effects on **two ordinal or
+binary responses measured repeatedly over time**. For example, HDL and LDL
+cholesterol recorded at every visit of a clinical trial. Responses may be
+missing intermittently and follow-up may be censored. The package implements
+the methods of Hu and Yi (2026, *Statistics in Medicine*).
+
+The treatment $A$ is conceptualized as two components: $A_1$ acting on the
+first response and $A_2$ on the second. Effects at the end of follow-up are
+defined through generalized odds ratios (GOR) of the two responses:
+
+* the total treatment effect $TTE_K$ compares $(A_1, A_2) = (1, 1)$ with
+  $(0, 0)$;
+* the separable treatment effects $STE_{1,K}$ and $STE_{2,K}$ change only the
+  component acting on one response, and satisfy
+  $STE_{1,K} + STE_{2,K} = 2\,TTE_K$.
+
+The counterfactual arms $(1, 0)$ and $(0, 1)$ are identified by a recursive
+formula in the transition probabilities of the responses. `BiSCaL` estimates
+these probabilities by maximum likelihood and tests whether the treatment
+affects one response more than the other.
+
+## Features
+
+* Maximum likelihood fitting of the transition and baseline models
+  (baseline-category logistic regressions), with intermittent missingness and
+  right-censoring handled through the observed-data likelihood.
+* Binary and ordinal responses, with any thresholds of the generalized odds
+  ratio.
+* Total and separable treatment effects, their absolute values and difference,
+  with delta-method standard errors and Wald tests, at given covariate values
+  or averaged over a covariate distribution.
+* Effects over the course of follow-up, with plots.
+* Counterfactual joint distributions and generalized odds ratios under any
+  combination of the treatment components.
+* Simulators and true values for the simulation designs of the paper.
+* Checked against the original research code of the paper: for the
+  simulation design with complete data, the estimates, covariance matrices,
+  effects and test statistics agree to numerical precision, and the effect
+  computations agree with those of the data analysis.
+
+## Installation
+
+Install the development version from GitHub:
+
+```{r, eval = FALSE}
+# install.packages("remotes")
+remotes::install_github("pingbohu43/BiSCaL", build_vignettes = TRUE)
+```
+
+## Example
+
+`simtrial` is a simulated trial with two binary responses, recorded at a
+baseline visit and ten follow-up visits, with missingness and censoring. Fit
+the models, then estimate the effects for two covariate profiles:
+
+```{r example}
+library(BiSCaL)
+
+fit <- biscal(cbind(y1, y2) ~ x1 + x2, data = simtrial, id = "id",
+              time = "visit", treatment = "trt")
+summary(fit)$coefficients$beta1      # transition model for y1
+
+aste(fit, newdata = data.frame(x1 = c(-1, 1), x2 = c(0, 1)))
+```
+
+Effects averaged over the covariates of the trial participants, and their
+evolution over follow-up:
+
+```{r population, fig.width = 6, fig.height = 3.6}
+easte(fit)$effects
+
+plot(easte(fit, K = 1:10))
+```
+
+## Main functions
+
+| Function | Purpose |
+|---|---|
+| `biscal()` | Fit the transition and baseline models by maximum likelihood |
+| `aste()` | Separable and total effects, and the test comparing them, given covariate values |
+| `easte()` | The same averaged over a covariate distribution |
+| `gor()`, `cf_prob()` | Generalized odds ratios and counterfactual joint distributions |
+| `simulate_biscal()`, `biscal_coefs()`, `biscal_truth()` | Simulation designs of the paper and their true effects |
+
+See `vignette("BiSCaL")` for a worked analysis and `vignette("simulation")`
+for the simulation studies of the paper reproduced with the package.
+
+## Citation
+
+If you use BiSCaL, please cite the paper (see `citation("BiSCaL")`):
+
+> Hu, P. and Yi, G. Y. (2026). Inference about separable causal effects with
+> longitudinal bivariate ordinal responses with missingness and censoring.
+> *Statistics in Medicine*, 45, e70320.
+> [doi:10.1002/sim.70320](https://doi.org/10.1002/sim.70320)
+
+## License
+
+GPL (>= 3)

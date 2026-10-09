@@ -1,0 +1,41 @@
+url: https://pingbohu43.github.io/BiSCaL/
+
+template:
+  bootstrap: 5
+  bslib:
+    primary: "#1f4e5f"
+  math-rendering: katex
+
+home:
+  title: "BiSCaL: bivariate separable causal effects in longitudinal studies"
+
+reference:
+  - title: Model fitting
+    desc: Fit the transition and baseline models by maximum likelihood.
+    contents:
+      - biscal
+      - biscal-methods
+  - title: Separable treatment effects
+    desc: Estimates, standard errors and tests, given covariate values or averaged over them.
+    contents:
+      - aste
+      - easte
+      - biscal-effects
+      - plot.biscal_aste
+  - title: Counterfactual quantities
+    contents:
+      - gor
+      - cf_prob
+  - title: Data and simulation
+    contents:
+      - simtrial
+      - simulate_biscal
+      - biscal_coefs
+      - biscal_truth
+
+articles:
+  - title: Articles
+    navbar: ~
+    contents:
+      - BiSCaL
+      - simulation
